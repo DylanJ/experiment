@@ -1,3 +1,9 @@
+var handle_ws_message = function(ws, e) {
+  if (e.data == "ping") {
+    ws.send("pong");
+  }
+}
+
 function init() {
   var test = document.createTextNode('Hello world');
   document.body.appendChild(test);
@@ -7,7 +13,7 @@ function init() {
     console.log("connected", e);
   });
   ws.addEventListener('message', function(e) {
-    console.log("message", e);
+    handle_ws_message(ws, e);
   });
   window.ws = ws;
 };

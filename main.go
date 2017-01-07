@@ -1,75 +1,72 @@
 package main
 
 import (
-	"fmt"
 	"io"
-	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/uber-go/zap"
 
 	"golang.org/x/net/websocket"
 )
 
-type usercon struct {
+// User represents a connection
+type User struct {
+	id   int
 	conn *websocket.Conn
-}
-
-// WS is a websocket thing
-type WS struct {
 }
 
 type connections map[*websocket.Conn]bool
 
 // Mux is a muxer
 type Mux struct {
-	ops   chan func(connections)
-	users []usercon
+	log zap.Logger
+	ops chan func(connections)
 }
 
 // NewMux returns a new ws muxer
-func NewMux() *Mux {
+func NewMux(logger zap.Logger) *Mux {
 	m := Mux{}
 	m.ops = make(chan func(connections))
+	m.log = logger
 	return &m
 }
 
 // Register a websocket
 func (m *Mux) Register(conn *websocket.Conn) {
-
 	result := make(chan int, 1)
 
-	fmt.Println("start")
 	m.ops <- func(m connections) {
 		m[conn] = true
-		fmt.Println("client registered:", conn.RemoteAddr().String())
 		result <- 1
 	}
 
 	finished := <-result
 	if finished == 1 {
-		m.Send(conn, "foobar")
+		m.log.Info(
+			"Client Registered",
+			zap.String("Address", conn.RemoteAddr().String()),
+		)
+		if err := m.Send(conn, "foobar"); err != nil {
+			m.log.Info(
+				"Client failed to register",
+				zap.String("Address", conn.RemoteAddr().String()),
+				zap.Error(err),
+			)
+		}
 	}
-
-	fmt.Println("fin")
 }
 
 // Unregister a websocket
 func (m *Mux) Unregister(conn *websocket.Conn) {
-	fmt.Println("unregistering client")
+	m.log.Info(
+		"Client Unregistered",
+		zap.String("Address", conn.RemoteAddr().String()),
+	)
 	m.ops <- func(m connections) {
 		delete(m, conn)
-	}
-}
-
-// ListClients hsow all slcients
-func (m *Mux) ListClients() {
-	fmt.Println("Listing Clients")
-	m.ops <- func(m connections) {
-		for addr := range m {
-			fmt.Println("con: ", addr.RemoteAddr().String())
-		}
 	}
 }
 
@@ -79,14 +76,19 @@ func (m *Mux) ReadClient(conn *websocket.Conn) {
 
 	for {
 		if lastPong.Add(time.Duration(time.Second * 2)).Before(time.Now()) {
-			fmt.Println("sending ping")
+			m.log.Info(
+				"Sending Ping",
+				zap.String("address", conn.RemoteAddr().String()),
+			)
+
 			if m.sendPing(conn) {
-				fmt.Println("keeping connection alive")
+				m.log.Info(
+					"Client Keep-Alive",
+					zap.String("address", conn.RemoteAddr().String()),
+				)
 				lastPong = time.Now()
 			} else {
 				m.Unregister(conn)
-				// ungraceful disconnect
-				fmt.Println("closing connection")
 				return
 			}
 		}
@@ -96,14 +98,8 @@ func (m *Mux) ReadClient(conn *websocket.Conn) {
 		err := websocket.Message.Receive(conn, &reply)
 
 		if err == io.EOF {
-			// graceful disconncet
-			fmt.Println("eof")
 			m.Unregister(conn)
 			return
-		}
-
-		if e, ok := err.(net.Error); ok && e.Timeout() {
-			fmt.Println("timeout")
 		}
 	}
 }
@@ -132,7 +128,6 @@ func (m *Mux) sendPing(conn *websocket.Conn) bool {
 func (m *Mux) Loop() {
 	conns := make(connections)
 
-	fmt.Println("q")
 	for op := range m.ops {
 		op(conns)
 	}
@@ -148,8 +143,7 @@ func (m *Mux) Send(conn *websocket.Conn, msg string) error {
 
 	found := <-result
 	if found == false {
-		fmt.Printf("client '%s' not registered", conn.RemoteAddr().String())
-		return errors.Errorf("client '%s' not registered", conn.RemoteAddr().String())
+		return errors.Errorf("Client '%s' not registered", conn.RemoteAddr().String())
 	}
 
 	_, err := conn.Write([]byte(msg))
@@ -159,11 +153,11 @@ func (m *Mux) Send(conn *websocket.Conn, msg string) error {
 // App does all
 type App struct {
 	mux Mux
-	ws  WS
 }
 
 func main() {
-	mux := NewMux()
+	logger := zap.New(zap.NewTextEncoder(zap.TextNoTime()), zap.Output(os.Stdout))
+	mux := NewMux(logger)
 	go mux.Loop()
 
 	http.Handle("/ws", websocket.Handler(func(ws *websocket.Conn) {
