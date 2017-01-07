@@ -103,11 +103,11 @@ func NewConn(signalws *websocket.Conn) *Conn {
 	pc.OnIceComplete = c.onIceComplete
 
 	fmt.Println("Initializing Datachannel")
-	opts := webrtc.Init{
-		Ordered:        false,
-		MaxRetransmits: 0,
-	}
-	dc, err := pc.CreateDataChannel("test", opts)
+	dc, err := pc.CreateDataChannel(
+		"test",
+		webrtc.Ordered(false),
+		webrtc.MaxRetransmits(0),
+	)
 	if nil != err {
 		fmt.Println("Failed to create channel", zap.Error(err))
 		return nil
