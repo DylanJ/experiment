@@ -6,19 +6,23 @@ import (
 	"os"
 	"time"
 
+	"github.com/dylanj/bombs/net/data"
 	"github.com/pkg/errors"
 	"github.com/uber-go/zap"
 
 	"golang.org/x/net/websocket"
 )
 
+var err error
+
 // User represents a connection
 type User struct {
 	id   int
 	conn *websocket.Conn
+	data *data.Conn
 }
 
-type connections map[*websocket.Conn]bool
+type connections map[*websocket.Conn]*User
 
 // Mux is a muxer
 type Mux struct {
@@ -35,11 +39,11 @@ func NewMux(logger zap.Logger) *Mux {
 }
 
 // Register a websocket
-func (m *Mux) Register(conn *websocket.Conn) {
+func (m *Mux) Register(u *User) {
 	result := make(chan int, 1)
 
 	m.ops <- func(m connections) {
-		m[conn] = true
+		m[u.conn] = u
 		result <- 1
 	}
 
@@ -47,15 +51,8 @@ func (m *Mux) Register(conn *websocket.Conn) {
 	if finished == 1 {
 		m.log.Info(
 			"Client Registered",
-			zap.String("Address", conn.RemoteAddr().String()),
+			zap.String("Address", u.conn.RemoteAddr().String()),
 		)
-		if err := m.Send(conn, "foobar"); err != nil {
-			m.log.Info(
-				"Client failed to register",
-				zap.String("Address", conn.RemoteAddr().String()),
-				zap.Error(err),
-			)
-		}
 	}
 }
 
@@ -72,45 +69,61 @@ func (m *Mux) Unregister(conn *websocket.Conn) {
 }
 
 // ReadClient reads the meessages fomr athe fclinmetn
-func (m *Mux) ReadClient(conn *websocket.Conn) {
+func (m *Mux) ReadClient(u *User) {
 	lastPong := time.Now()
 
 	for {
 		if lastPong.Add(time.Duration(time.Second * 2)).Before(time.Now()) {
 			m.log.Info(
 				"Sending Ping",
-				zap.String("address", conn.RemoteAddr().String()),
+				zap.String("address", u.conn.RemoteAddr().String()),
 			)
 
-			if m.sendPing(conn) {
+			if m.sendPing(u.conn) {
 				m.log.Info(
 					"Client Keep-Alive",
-					zap.String("address", conn.RemoteAddr().String()),
+					zap.String("address", u.conn.RemoteAddr().String()),
 				)
 
 				lastPong = time.Now()
 			} else {
-				m.Unregister(conn)
+				m.Unregister(u.conn)
 				return
 			}
 		}
 
-		var reply string
-		conn.SetReadDeadline(time.Now().Add(time.Duration(1 * time.Second)))
-		err := websocket.Message.Receive(conn, &reply)
+		type data struct {
+			Event string
+			Data  string
+		}
+
+		var reply data
+		u.conn.SetReadDeadline(time.Now().Add(time.Duration(1 * time.Second)))
+		// err := websocket.Message.Receive(conn, &reply)
+		err := websocket.JSON.Receive(u.conn, &reply)
+
+		if reply.Event == "answer" {
+			u.data.ReceiveAnswer(reply.Data)
+		}
 
 		if err == io.EOF {
-			m.Unregister(conn)
+			m.Unregister(u.conn)
 			return
 		}
 	}
+}
+
+// Event is a wrapper object for a message sent over websockets
+type Event struct {
+	Event string      `json:"event"`
+	Data  interface{} `json:"data"`
 }
 
 func (m *Mux) sendPing(conn *websocket.Conn) bool {
 	deadline := time.Now().Add(time.Duration(2 * time.Second))
 	conn.SetWriteDeadline(deadline)
 	conn.SetReadDeadline(deadline)
-	conn.Write([]byte("ping"))
+	websocket.JSON.Send(conn, Event{"ping", "foo"})
 
 	var reply string
 	err := websocket.Message.Receive(conn, &reply)
@@ -137,14 +150,14 @@ func (m *Mux) Loop() {
 
 // Send a message
 func (m *Mux) Send(conn *websocket.Conn, msg string) error {
-	result := make(chan bool, 1)
+	result := make(chan *User, 1)
 	m.ops <- func(m connections) {
 		v := m[conn]
 		result <- v
 	}
 
 	found := <-result
-	if found == false {
+	if found == nil {
 		return errors.Errorf("Client '%s' not registered", conn.RemoteAddr().String())
 	}
 
@@ -163,9 +176,17 @@ func main() {
 	go mux.Loop()
 
 	http.Handle("/ws", websocket.Handler(func(ws *websocket.Conn) {
-		mux.Register(ws)
-		mux.ReadClient(ws)
+		dc := data.NewConn(ws)
+
+		u := User{
+			conn: ws,
+			data: dc,
+		}
+
+		mux.Register(&u)
+		mux.ReadClient(&u)
 	}))
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "index.html")
 	})
