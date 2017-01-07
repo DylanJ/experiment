@@ -59,12 +59,13 @@ func (m *Mux) Register(conn *websocket.Conn) {
 	}
 }
 
-// Unregister a websocket
+// Unregister the client.
 func (m *Mux) Unregister(conn *websocket.Conn) {
 	m.log.Info(
 		"Client Unregistered",
 		zap.String("Address", conn.RemoteAddr().String()),
 	)
+
 	m.ops <- func(m connections) {
 		delete(m, conn)
 	}
@@ -86,6 +87,7 @@ func (m *Mux) ReadClient(conn *websocket.Conn) {
 					"Client Keep-Alive",
 					zap.String("address", conn.RemoteAddr().String()),
 				)
+
 				lastPong = time.Now()
 			} else {
 				m.Unregister(conn)

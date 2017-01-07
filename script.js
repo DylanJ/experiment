@@ -15,6 +15,9 @@ function init() {
   ws.addEventListener('message', function(e) {
     handle_ws_message(ws, e);
   });
+  ws.addEventListener('close', function(e) {
+    console.log("disconnected", e);
+  });
   window.ws = ws;
 };
 
