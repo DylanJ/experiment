@@ -2,7 +2,6 @@ window.PeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection 
 window.RTCIceCandidate = window.RTCIceCandidate || window.mozRTCIceCandidate;
 window.RTCSessionDescription = window.RTCSessionDescription || window.mozRTCSessionDescription;
 
-
 var handle_ws_message = function(ws, e) {
   console.log("ws data:", e.data)
   var msg = JSON.parse(e.data);
@@ -36,9 +35,7 @@ function init() {
 
 document.addEventListener('DOMContentLoaded', init);
 
-
 var StartWebRTC = function(ws, offer) {
-
   var config = {
     iceServers: [
       { urls: ["stun:stun.l.google.com:19302"] }
@@ -48,7 +45,6 @@ var StartWebRTC = function(ws, offer) {
   var pc = new PeerConnection(config, {
     optional: [
       { DtlsSrtpKeyAgreement: true },
-      { RtpDataChannels: false },
     ],
   });
 
@@ -63,7 +59,7 @@ var StartWebRTC = function(ws, offer) {
   };
 	function prepareDataChannel(channel) {
 		channel.onopen = function() {
-			console.log("Data channel opened!");
+			console.log("Data channel opened! (reliable: " + channel.reliable + ", ordered: " + channel.ordered +")");
 		}
 		channel.onclose = function() {
 			console.log("Data channel closed.");

@@ -12,7 +12,7 @@ import (
 var stun webrtc.ConfigurationOption
 
 func init() {
-	webrtc.SetLoggingVerbosity(1)
+	webrtc.SetLoggingVerbosity(3)
 	stun = webrtc.OptionIceServer("stun:stun.l.google.com:19302")
 }
 
@@ -72,6 +72,8 @@ func (c *Conn) onIceComplete() {
 func (c *Conn) prepareDataChannel(channel *webrtc.DataChannel) {
 	channel.OnOpen = func() {
 		fmt.Println("Data Opening Channel")
+		fmt.Println("(ordered:", channel.Ordered(), ", MaxRetransmits:", channel.MaxRetransmits())
+		fmt.Println("(MaxLife", channel.MaxPacketLifeTime())
 	}
 
 	channel.OnClose = func() {
@@ -80,6 +82,7 @@ func (c *Conn) prepareDataChannel(channel *webrtc.DataChannel) {
 
 	channel.OnMessage = func(msg []byte) {
 		fmt.Println("Data Channel message", "msg", string(msg))
+		channel.Send([]byte("hey!"))
 	}
 }
 
@@ -100,14 +103,19 @@ func NewConn(signalws *websocket.Conn) *Conn {
 	pc.OnIceComplete = c.onIceComplete
 
 	fmt.Println("Initializing Datachannel")
-	dc, err := pc.CreateDataChannel("test", webrtc.Init{})
+	opts := webrtc.Init{
+		Ordered:        false,
+		MaxRetransmits: 0,
+	}
+	dc, err := pc.CreateDataChannel("test", opts)
 	if nil != err {
 		fmt.Println("Failed to create channel", zap.Error(err))
 		return nil
 	}
 
-	c.dc = dc
 	c.prepareDataChannel(dc)
+
+	c.dc = dc
 	c.pc = pc
 
 	return &c
