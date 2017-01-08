@@ -134,8 +134,8 @@ func NewConn(signalws *websocket.Conn, onMessage func([]byte)) *Conn {
 	fmt.Println("Initializing Datachannel")
 	dc, err := pc.CreateDataChannel(
 		"test",
-		// webrtc.Ordered(false),
-		// webrtc.MaxRetransmits(0),
+		webrtc.Ordered(false),
+		webrtc.MaxRetransmits(0),
 	)
 	if nil != err {
 		fmt.Println("Failed to create channel", zap.Error(err))
